@@ -1,24 +1,131 @@
 import streamlit as st
 import pandas as pd
-import joblib
 
-# -----------------------------
-# Load trained model
-# -----------------------------
-@st.cache_resource
-def load_model():
-    return joblib.load("best_model.joblib")
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.ensemble import RandomForestClassifier
 
-model = load_model()
-
-# -----------------------------
-# Page configuration
-# -----------------------------
 st.set_page_config(
     page_title="Wellness Tourism Package Predictor",
     page_icon="🏖️",
     layout="wide"
 )
+
+# -------------------------------------------------
+# TRAIN MODEL DIRECTLY FROM tourism.csv
+# -------------------------------------------------
+
+@st.cache_resource
+def train_model():
+
+    df = pd.read_csv("tourism.csv")
+
+    # Clean columns used in your notebook
+    drop_cols = [
+        c for c in ["Unnamed: 0", "CustomerID"]
+        if c in df.columns
+    ]
+
+    df = df.drop(columns=drop_cols)
+
+    if "Gender" in df.columns:
+        df["Gender"] = df["Gender"].replace({
+            "Fe Male": "Female"
+        })
+
+    if "MaritalStatus" in df.columns:
+        df["MaritalStatus"] = df["MaritalStatus"].replace({
+            "Unmarried": "Single"
+        })
+
+    df = df.drop_duplicates().reset_index(drop=True)
+
+    target = "ProdTaken"
+
+    X = df.drop(columns=[target])
+    y = df[target]
+
+    X_train, _, y_train, _ = train_test_split(
+        X,
+        y,
+        test_size=0.20,
+        random_state=42,
+        stratify=y
+    )
+
+    numeric_features = X_train.select_dtypes(
+        include=["int64", "float64"]
+    ).columns.tolist()
+
+    categorical_features = X_train.select_dtypes(
+        include=["object", "string"]
+    ).columns.tolist()
+
+    numeric_transformer = Pipeline([
+        (
+            "imputer",
+            SimpleImputer(strategy="median")
+        ),
+        (
+            "scaler",
+            StandardScaler()
+        )
+    ])
+
+    categorical_transformer = Pipeline([
+        (
+            "imputer",
+            SimpleImputer(strategy="most_frequent")
+        ),
+        (
+            "onehot",
+            OneHotEncoder(handle_unknown="ignore")
+        )
+    ])
+
+    preprocessor = ColumnTransformer([
+        (
+            "num",
+            numeric_transformer,
+            numeric_features
+        ),
+        (
+            "cat",
+            categorical_transformer,
+            categorical_features
+        )
+    ])
+
+    model = Pipeline([
+        (
+            "preprocessor",
+            preprocessor
+        ),
+        (
+            "classifier",
+            RandomForestClassifier(
+                n_estimators=200,
+                max_depth=12,
+                min_samples_split=2,
+                random_state=42,
+                class_weight="balanced"
+            )
+        )
+    ])
+
+    model.fit(X_train, y_train)
+
+    return model
+
+
+model = train_model()
+
+# -------------------------------------------------
+# USER INTERFACE
+# -------------------------------------------------
 
 st.title("🏖️ Wellness Tourism Package Purchase Predictor")
 
@@ -26,10 +133,6 @@ st.write(
     "Enter customer details below to predict whether the customer "
     "is likely to purchase the Wellness Tourism Package."
 )
-
-# -----------------------------
-# User Inputs
-# -----------------------------
 
 col1, col2, col3 = st.columns(3)
 
@@ -68,7 +171,7 @@ with col1:
     )
 
     DurationOfPitch = st.number_input(
-        "Duration of Pitch (minutes)",
+        "Duration of Pitch",
         min_value=0,
         max_value=60,
         value=15
@@ -103,7 +206,7 @@ with col2:
     )
 
     PreferredPropertyStar = st.selectbox(
-        "Preferred Property Star Rating",
+        "Preferred Property Star",
         [3.0, 4.0, 5.0]
     )
 
@@ -113,14 +216,14 @@ with col2:
     )
 
     NumberOfTrips = st.number_input(
-        "Number of Trips per Year",
+        "Number of Trips",
         min_value=0,
         max_value=20,
         value=2
     )
 
     Passport = st.selectbox(
-        "Holds Passport?",
+        "Passport",
         ["No", "Yes"]
     )
 
@@ -135,7 +238,7 @@ with col3:
     )
 
     OwnCar = st.selectbox(
-        "Owns a Car?",
+        "Owns Car?",
         ["No", "Yes"]
     )
 
@@ -165,43 +268,26 @@ with col3:
     )
 
 
-# -----------------------------
-# Prediction
-# -----------------------------
+# -------------------------------------------------
+# PREDICTION
+# -------------------------------------------------
 
 if st.button("Predict"):
 
     input_df = pd.DataFrame([{
 
         "Age": Age,
-
         "TypeofContact": TypeofContact,
-
         "CityTier": CityTier,
-
         "DurationOfPitch": DurationOfPitch,
-
         "Occupation": Occupation,
-
         "Gender": Gender,
-
-        "NumberOfPersonVisiting":
-            NumberOfPersonVisiting,
-
-        "NumberOfFollowups":
-            NumberOfFollowups,
-
-        "ProductPitched":
-            ProductPitched,
-
-        "PreferredPropertyStar":
-            PreferredPropertyStar,
-
-        "MaritalStatus":
-            MaritalStatus,
-
-        "NumberOfTrips":
-            NumberOfTrips,
+        "NumberOfPersonVisiting": NumberOfPersonVisiting,
+        "NumberOfFollowups": NumberOfFollowups,
+        "ProductPitched": ProductPitched,
+        "PreferredPropertyStar": PreferredPropertyStar,
+        "MaritalStatus": MaritalStatus,
+        "NumberOfTrips": NumberOfTrips,
 
         "Passport":
             1 if Passport == "Yes" else 0,
@@ -220,7 +306,6 @@ if st.button("Predict"):
 
         "MonthlyIncome":
             MonthlyIncome
-
     }])
 
     prediction = model.predict(input_df)[0]
